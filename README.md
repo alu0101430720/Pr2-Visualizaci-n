@@ -6,7 +6,7 @@ Se cuenta con dos notebooks:
 
       [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1fynBq2wazR61BC3VpXCu8Pci01diL024?usp=sharing)
 
-   2. Pr2-Visualizacion-CarlosYanesPerez-V2. En este caso se presenta la orquestación en Dagster.
+   2. Pr2-Visualizacion-CarlosYanesPerez-V2.ipynb. En este caso se presenta la orquestación en Dagster.
 
       [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1BR2nPEB1wYUOcW08n43Z4maHiedqeRIr?usp=sharing)
 
