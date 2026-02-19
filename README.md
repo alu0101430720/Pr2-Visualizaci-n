@@ -1,12 +1,14 @@
 # Pr2-Visualización
 
 Se cuenta con dos notebooks:
+
    [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1fynBq2wazR61BC3VpXCu8Pci01diL024?usp=sharing)
 
    1. Pr2-Visualizacion-CarlosYanesPerez-lab-renta.ipynb. Aquí se muestra la lógica seguida para el preprocesado de los datasets y la creación de los gráficos.
+      
    [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1BR2nPEB1wYUOcW08n43Z4maHiedqeRIr?usp=sharing)
 
-   2. Pr2-Visualizacion-CarlosYanesPerez-V2. En este caso se presenta la orquestación en Dagster.
+   3. Pr2-Visualizacion-CarlosYanesPerez-V2. En este caso se presenta la orquestación en Dagster.
 
 Los notebooks son totalmente independientes, pero se hace uso de ambos para separar la lógica seguida, de la orquestación final.
 
