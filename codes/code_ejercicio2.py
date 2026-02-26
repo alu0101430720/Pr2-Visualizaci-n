@@ -259,7 +259,7 @@ def commit_ejercicio2(
     context.log.info("Commit realizado: " + result.stdout)
 
     result = subprocess.run(
-        ["git", "-C", repo_dir, "push", repo_url],
+        ["git", "-C", repo_dir, "push", repo_url, "HEAD:practica3/data-checks"],
         capture_output=True, text=True
     )
     if result.returncode != 0:

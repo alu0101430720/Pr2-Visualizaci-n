@@ -73,4 +73,15 @@ def pull_repository(context: OpExecutionContext, configure_git: str, github_toke
         raise RuntimeError(msg)
 
     context.log.info("git pull completado: " + result.stdout)
+
+    result = subprocess.run(
+    ["git", "-C", repo_dir, "checkout", "-B", "practica3/data-checks"],
+    capture_output=True, text=True
+    )
+
+    if result.returncode != 0:
+        raise RuntimeError("Error en git checkout: " + result.stderr)
+        
+    context.log.info("Branch activo: practica3/data-checks")
+
     return repo_dir
