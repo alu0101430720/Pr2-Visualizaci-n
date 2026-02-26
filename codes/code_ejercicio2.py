@@ -146,7 +146,7 @@ class Fuentes:
 @asset(deps=["pull_repository"])
 def ingestar_codislas(context: OpExecutionContext, pull_repository: str) -> pd.DataFrame:
     """Lee el CSV de códigos de islas."""
-    ruta = "Pr2-Visualizacion/codislas.csv"
+    ruta = "Pr2-Visualizacion/datasets-check/codislas-checks.csv"
     df = pd.read_csv(ruta, encoding='latin-1', sep=';')
     context.log.info("codislas.csv cargado: " + str(df.shape[0]) + " filas.")
     return df
@@ -198,7 +198,7 @@ def guardar_ejercicio2(context: OpExecutionContext, construir_ejercicio2: pd.Dat
 @asset(deps=["construir_ejercicio2"])
 def generar_grafico_ejercicio2(context: OpExecutionContext, construir_ejercicio2: pd.DataFrame) -> str:
     """Genera y guarda el gráfico territorial del ejercicio 2."""
-    territorio = 'Tenerife'
+    territorio = 'La Gomera'
     fuentes_codigo = Fuentes.SALARIOS
     directorio = "Pr2-Visualizacion/graficos"
     os.makedirs(directorio, exist_ok=True)

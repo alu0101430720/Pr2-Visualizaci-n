@@ -81,7 +81,7 @@ def pull_repository(context: OpExecutionContext, configure_git: str, github_toke
 
     if result.returncode != 0:
         raise RuntimeError("Error en git checkout: " + result.stderr)
-        
+
     context.log.info("Branch activo: practica3/data-checks")
 
     return repo_dir

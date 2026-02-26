@@ -45,7 +45,7 @@ def graficar_renta(df, territorio='Canarias', fuentes_codigo=None, mostrar_leyen
 @asset(deps=["pull_repository"])
 def ingestar_renta(context: OpExecutionContext, pull_repository: str) -> pd.DataFrame:
     """Lee el CSV original de distribución de renta."""
-    ruta = "Pr2-Visualizacion/distribucion-renta-canarias.csv"
+    ruta = "Pr2-Visualizacion/datasets-check/distribucion-renta-canarias-checks.csv"
     df = pd.read_csv(ruta)
     context.log.info("CSV cargado: " + str(df.shape[0]) + " filas, " + str(df.shape[1]) + " columnas.")
     return df
