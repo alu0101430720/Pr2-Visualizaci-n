@@ -146,7 +146,8 @@ class Fuentes:
 @asset(deps=["pull_repository"])
 def ingestar_codislas(context: OpExecutionContext, pull_repository: str) -> pd.DataFrame:
     """Lee el CSV de códigos de islas."""
-    ruta = "Pr2-Visualizacion/datasets-check/codislas-checks.csv"
+    #ruta = "Pr2-Visualizacion/datasets-check/codislas-checks.csv"
+    ruta = "Pr2-Visualizacion/codislas.csv"
     df = pd.read_csv(ruta, encoding='latin-1', sep=';')
     context.log.info("codislas.csv cargado: " + str(df.shape[0]) + " filas.")
     return df

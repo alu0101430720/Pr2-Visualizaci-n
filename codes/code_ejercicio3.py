@@ -166,7 +166,8 @@ def dashboard_renta_social_final(df_renta, df_educacion,
 @asset(deps=["pull_repository"])
 def ingestar_nivelestudios(context: OpExecutionContext, pull_repository: str) -> pd.DataFrame:
     """Lee el Excel de nivel de estudios."""
-    ruta = "Pr2-Visualizacion/datasets-check/nivelestudios-checks.xlsx"
+    #ruta = "Pr2-Visualizacion/datasets-check/nivelestudios-checks.xlsx"
+    ruta = "Pr2-Visualizacion/nivelestudios.xlsx"
     df = pd.read_excel(ruta)
     context.log.info("nivelestudios.xlsx cargado: " + str(df.shape[0]) + " filas.")
     return df
