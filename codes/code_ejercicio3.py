@@ -226,7 +226,7 @@ def generar_graficos_ejercicio3(
     """Genera y guarda los dos gráficos del dashboard del ejercicio 3."""
     warnings.filterwarnings('ignore')
 
-    territorio = 'Fuerteventura'
+    territorio = 'Tenerife'
     dimension_social = 'Nacionalidad'
     directorio = "Pr2-Visualizacion/graficos"
     os.makedirs(directorio, exist_ok=True)

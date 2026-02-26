@@ -199,7 +199,7 @@ def guardar_ejercicio2(context: OpExecutionContext, construir_ejercicio2: pd.Dat
 @asset(deps=["construir_ejercicio2"])
 def generar_grafico_ejercicio2(context: OpExecutionContext, construir_ejercicio2: pd.DataFrame) -> str:
     """Genera y guarda el gráfico territorial del ejercicio 2."""
-    territorio = 'La Gomera'
+    territorio = 'Tenerife'
     fuentes_codigo = Fuentes.SALARIOS
     directorio = "Pr2-Visualizacion/graficos"
     os.makedirs(directorio, exist_ok=True)
