@@ -16,9 +16,10 @@ import warnings
 import pandas as pd
 from dagster import asset, OpExecutionContext
 
-from config import DIR_CLEAN, DIR_GRAFICOS, GIT_BRANCH, REPO_DIR, RAW_NIVELESTUDIOS, Fuentes, repo_url
+from config import DIR_CLEAN, DIR_GRAFICOS, GIT_BRANCH, REPO_DIR, RAW_NIVELESTUDIOS, Fuentes, Dashboard, repo_url
 from charts import graficar_renta_territorial, graficar_social
 from utils import commit_and_push
+from pr2_assets.git_ops import get_github_token
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -115,30 +116,28 @@ def generar_graficos_ejercicio3(
     """
     warnings.filterwarnings("ignore")
 
-    # ── Parámetros del dashboard ───────────────────────────────────────────────
-    TERRITORIO      = "Tenerife"
-    FUENTE          = Fuentes.SALARIOS
-    DIM_SOCIAL      = "Nacionalidad"   # "Estudios" | "Sexo" | "Nacionalidad"
-    COMPARAR_SUBS   = True
-    DESGLOSAR_MUNIS = True
-    # ──────────────────────────────────────────────────────────────────────────
-
     os.makedirs(DIR_GRAFICOS, exist_ok=True)
     rutas = []
+
+    # Parámetros leídos desde config.Dashboard — cámbialos allí, no aquí
+    context.log.info(
+        f"Dashboard: territorio={Dashboard.TERRITORIO}, fuente={Dashboard.FUENTE}, "
+        f"dim_social={Dashboard.DIM_SOCIAL}"
+    )
 
     # Gráfico de renta
     g_renta = graficar_renta_territorial(
         integrar_renta_codislas,
-        territorio=TERRITORIO,
-        fuentes_codigo=FUENTE,
-        comparar_subterritorios=COMPARAR_SUBS,
-        desglosar_municipios=DESGLOSAR_MUNIS,
-        mostrar_leyenda=True,
-        eje_y_cero=True,
+        territorio=Dashboard.TERRITORIO,
+        fuentes_codigo=Dashboard.FUENTE,
+        comparar_subterritorios=Dashboard.COMPARAR_SUBS,
+        desglosar_municipios=Dashboard.DESGLOSAR_MUNIS,
+        mostrar_leyenda=Dashboard.MOSTRAR_LEYENDA,
+        eje_y_cero=Dashboard.EJE_Y_CERO,
     )
     if g_renta is None:
-        raise RuntimeError(f"Gráfico de renta vacío para '{TERRITORIO}'.")
-    ruta_renta = f"{DIR_GRAFICOS}/ejercicio3_renta_{_slug(TERRITORIO)}.png"
+        raise RuntimeError(f"Gráfico de renta vacío para '{Dashboard.TERRITORIO}'.")
+    ruta_renta = f"{DIR_GRAFICOS}/ejercicio3_renta_{_slug(Dashboard.TERRITORIO)}.png"
     g_renta.save(ruta_renta, dpi=150)
     context.log.info(f"Gráfico renta → {ruta_renta}")
     rutas.append(ruta_renta)
@@ -146,12 +145,15 @@ def generar_graficos_ejercicio3(
     # Gráfico social
     g_social = graficar_social(
         enriquecer_nivelestudios,
-        territorio=TERRITORIO,
-        dimension_social=DIM_SOCIAL,
-        desglosar_municipios=DESGLOSAR_MUNIS,
-        comparar_subterritorios=COMPARAR_SUBS,
+        territorio=Dashboard.TERRITORIO,
+        dimension_social=Dashboard.DIM_SOCIAL,
+        desglosar_municipios=Dashboard.DESGLOSAR_MUNIS,
+        comparar_subterritorios=Dashboard.COMPARAR_SUBS,
     )
-    ruta_social = f"{DIR_GRAFICOS}/ejercicio3_social_{_slug(DIM_SOCIAL)}_{_slug(TERRITORIO)}.png"
+    ruta_social = (
+        f"{DIR_GRAFICOS}/ejercicio3_social_"
+        f"{_slug(Dashboard.DIM_SOCIAL)}_{_slug(Dashboard.TERRITORIO)}.png"
+    )
     g_social.save(ruta_social, dpi=150)
     context.log.info(f"Gráfico social → {ruta_social}")
     rutas.append(ruta_social)
@@ -162,7 +164,6 @@ def generar_graficos_ejercicio3(
 @asset
 def commit_ejercicio3(
     context: OpExecutionContext,
-    github_token: str,
     guardar_nivelestudios_limpio: str,
     guardar_renta_limpia: str,
     guardar_codislas_limpia: str,
@@ -171,22 +172,20 @@ def commit_ejercicio3(
 ) -> None:
     """
     Añade todos los ficheros generados, hace commit y push a la rama de trabajo.
-
-    Incluye datasets limpios (opcional — elimina los que no necesites) y gráficos.
+    El token se lee desde la variable de entorno — nunca se recibe como parámetro
+    para evitar que Dagster lo persista en disco.
     """
     archivos = [
-        # Datasets limpios — comenta las líneas que no quieras commitear
         guardar_renta_limpia,
         guardar_codislas_limpia,
         guardar_renta_integrada,
         guardar_nivelestudios_limpio,
-        # Gráficos (siempre)
         *generar_graficos_ejercicio3,
     ]
 
     commit_and_push(
         repo_dir=REPO_DIR,
-        remote_url=repo_url(github_token),
+        remote_url=repo_url(get_github_token()),
         branch=GIT_BRANCH,
         files=archivos,
         message="ejercicio3: datasets limpios + graficos dashboard renta/social",
