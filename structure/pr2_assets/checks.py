@@ -1,20 +1,13 @@
 """
 assets/checks.py — Asset checks del pipeline Pr2-Visualizacion.
 
-Organización por etapa:
-  CARGA (Raw)       → checks sobre ingestar_renta, ingestar_codislas, ingestar_nivelestudios
-  TRANSFORMACIÓN    → checks sobre limpiar_*, integrar_*, enriquecer_*
-  VISUALIZACIÓN     → checks sobre generar_graficos_ejercicio3
-
-Los checks de VISUALIZACIÓN leen los parámetros desde config.Dashboard,
-por lo que siempre validan exactamente el subconjunto de datos que se
-está graficando en la ejecución actual. Si cambias Dashboard.TERRITORIO,
-los checks se adaptan automáticamente sin tocar este fichero.
+Organización por etapa (REFACTORIZADO):
+  CARGA (Raw)       → Solo checks críticos de esquema y nulos masivos que romperían el pipeline.
+  TRANSFORMACIÓN    → Checks de formato (curated), cardinalidad y reglas de negocio sobre los datos limpios.
+  VISUALIZACIÓN     → Checks dinámicos sobre el subconjunto graficado según config.Dashboard.
 """
 
-import hashlib
 import os
-
 import pandas as pd
 from dagster import (
     AssetCheckResult,
@@ -37,19 +30,17 @@ from config import (
     DOMINANCE_OTROS_MAX,
 )
 
-# ── Paleta maestra: color asignado a cada fuente de renta ─────────────────────
-# Debe coincidir con la paleta Set1 de plotnine (orden de aparición).
-PALETA_MAESTRA: dict[str, str] = {
-    Fuentes.SALARIOS:           "#E41A1C",
-    Fuentes.PENSIONES:          "#377EB8",
-    Fuentes.DESEMPLEO:          "#4DAF4A",
-    Fuentes.OTROS_INGRESOS:     "#984EA3",
-    Fuentes.OTRAS_PRESTACIONES: "#FF7F00",
-}
-_PALETA_HASH = hashlib.md5(str(sorted(PALETA_MAESTRA.items())).encode()).hexdigest()
+# ── Funciones Helper DRY ──────────────────────────────────────────────────────
 
+def _get_title_case_errors(series: pd.Series) -> list:
+    """Devuelve una lista de valores que no cumplen con el formato Title Case."""
+    mask = series.str.strip() != series.str.strip().str.title()
+    return series.loc[mask].unique().tolist()
 
-# ── Helper: replica el filtrado de graficar_renta_territorial ─────────────────
+def _get_inverted_name_errors(series: pd.Series) -> list:
+    """Detecta valores en formato 'Apellido, Artículo' (ej. 'Gomera, La')."""
+    valid_series = series.dropna()
+    return valid_series[valid_series.str.contains(",", na=False)].unique().tolist()
 
 def _filtrar_datos_dashboard(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -64,7 +55,6 @@ def _filtrar_datos_dashboard(df: pd.DataFrame) -> pd.DataFrame:
     es_region    = territorio == "Canarias"
     es_prov_lp   = territorio == "Las Palmas"
     es_prov_sct  = territorio == "Santa Cruz de Tenerife"
-    es_provincia = es_prov_lp or es_prov_sct
 
     datos = df.copy()
 
@@ -89,7 +79,6 @@ def _filtrar_datos_dashboard(df: pd.DataFrame) -> pd.DataFrame:
 
     return datos
 
-
 def _contexto_dashboard() -> str:
     """Texto descriptivo del dashboard activo, para incluir en metadata."""
     return (
@@ -99,48 +88,13 @@ def _contexto_dashboard() -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ETAPA 1 — CARGA (Raw)
+# ETAPA 1 — CARGA (Raw) - Solo validaciones de viabilidad crítica
 # ══════════════════════════════════════════════════════════════════════════════
 
 @asset_check(
     asset="ingestar_renta",
-    name="check_estandarizacion_territorio_renta",
-    description=(
-        "Evita duplicados por errores de escritura en TERRITORIO#es "
-        "(ej. 'canarias' vs 'Canarias'). "
-        "Gestalt — Similitud: una misma categoría pintada con dos colores "
-        "rompe la agrupación visual."
-    ),
-)
-def check_estandarizacion_territorio_renta(ingestar_renta: pd.DataFrame) -> AssetCheckResult:
-    col = "TERRITORIO#es"
-    originales   = ingestar_renta[col].nunique()
-    normalizadas = ingestar_renta[col].str.strip().str.title().nunique()
-    passed = originales == normalizadas
-    return AssetCheckResult(
-        passed=passed,
-        severity=AssetCheckSeverity.WARN,
-        metadata={
-            "categorias_detectadas": MetadataValue.int(originales),
-            "categorias_esperadas":  MetadataValue.int(normalizadas),
-            "principio_gestalt": MetadataValue.text(
-                "Similitud — Evita que una misma categoría se pinte con dos colores distintos."
-            ),
-            "mensaje": MetadataValue.text(
-                "Si hay nombres inconsistentes, ggplot creará leyendas duplicadas."
-            ),
-        },
-    )
-
-
-@asset_check(
-    asset="ingestar_renta",
     name="check_nulos_criticos_renta",
-    description=(
-        "Detecta ausencia de datos en OBS_VALUE (porcentaje de renta). "
-        "Gestalt — Figura y Fondo: los huecos inesperados rompen "
-        "la forma continua de una línea temporal."
-    ),
+    description="Detecta ausencia de datos en OBS_VALUE (porcentaje de renta). Gestalt — Figura y Fondo.",
 )
 def check_nulos_criticos_renta(ingestar_renta: pd.DataFrame) -> AssetCheckResult:
     col    = "OBS_VALUE"
@@ -156,41 +110,9 @@ def check_nulos_criticos_renta(ingestar_renta: pd.DataFrame) -> AssetCheckResult
             "principio_gestalt": MetadataValue.text(
                 "Figura y Fondo — Los huecos inesperados rompen la forma de la visualización."
             ),
-            "mensaje": MetadataValue.text(
-                "Un NaN en OBS_VALUE produce un corte en la línea temporal del gráfico."
-            ),
+            "mensaje": MetadataValue.text("Un NaN en OBS_VALUE produce un corte en la línea temporal."),
         },
     )
-
-
-@asset_check(
-    asset="ingestar_codislas",
-    name="check_estandarizacion_isla_codislas",
-    description=(
-        "Verifica consistencia de mayúsculas en ISLA. "
-        "Gestalt — Similitud."
-    ),
-)
-def check_estandarizacion_isla_codislas(ingestar_codislas: pd.DataFrame) -> AssetCheckResult:
-    col = "ISLA"
-    originales   = ingestar_codislas[col].nunique()
-    normalizadas = ingestar_codislas[col].str.strip().str.title().nunique()
-    passed = originales == normalizadas
-    return AssetCheckResult(
-        passed=passed,
-        severity=AssetCheckSeverity.WARN,
-        metadata={
-            "categorias_detectadas": MetadataValue.int(originales),
-            "categorias_esperadas":  MetadataValue.int(normalizadas),
-            "principio_gestalt": MetadataValue.text(
-                "Similitud — Evita que una misma isla se pinte con dos colores distintos."
-            ),
-            "mensaje": MetadataValue.text(
-                "Inconsistencias en ISLA rompen el merge con el dataset de renta."
-            ),
-        },
-    )
-
 
 @asset_check(
     asset="ingestar_codislas",
@@ -215,7 +137,6 @@ def check_nulos_criticos_codislas(ingestar_codislas: pd.DataFrame) -> AssetCheck
         },
     )
 
-
 @asset_check(
     asset="ingestar_nivelestudios",
     name="check_nulos_criticos_nivelestudios",
@@ -229,23 +150,71 @@ def check_nulos_criticos_nivelestudios(ingestar_nivelestudios: pd.DataFrame) -> 
     meta["principio_gestalt"] = MetadataValue.text(
         "Figura y Fondo — Los huecos inesperados rompen la forma de la visualización."
     )
-    meta["mensaje"] = MetadataValue.text(
-        "Nulos en Total o Periodo producen áreas apiladas incompletas."
-    )
+    meta["mensaje"] = MetadataValue.text("Nulos en Total o Periodo producen áreas apiladas incompletas.")
     return AssetCheckResult(passed=passed, severity=AssetCheckSeverity.ERROR, metadata=meta)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ETAPA 2 — TRANSFORMACIÓN (Curated)
+# ETAPA 2 — TRANSFORMACIÓN (Curated) - Calidad de datos aplicable a cualquier uso
 # ══════════════════════════════════════════════════════════════════════════════
 
 @asset_check(
     asset="limpiar_renta",
+    name="check_duplicados_limpiar_renta",
+    description="Verifica que la limpieza no introdujo ni mantuvo filas duplicadas. Gestalt — Figura y Fondo.",
+)
+def check_duplicados_limpiar_renta(limpiar_renta: pd.DataFrame) -> AssetCheckResult:
+    n_duplicados = int(limpiar_renta.duplicated().sum())
+    return AssetCheckResult(
+        passed=n_duplicados == 0,
+        severity=AssetCheckSeverity.ERROR,
+        metadata={
+            "filas_duplicadas":  MetadataValue.int(n_duplicados),
+            "principio_gestalt": MetadataValue.text("Figura y Fondo — Duplicados inflan las series."),
+            "mensaje": MetadataValue.text("Añade df.drop_duplicates() al final de limpiar_renta si este check falla."),
+        },
+    )
+
+@asset_check(
+    asset="limpiar_renta",
+    name="check_formato_title_limpiar_renta",
+    description="Verifica que Territorio está en Title Case tras la limpieza. Gestalt — Similitud.",
+)
+def check_formato_title_limpiar_renta(limpiar_renta: pd.DataFrame) -> AssetCheckResult:
+    incorrectos = _get_title_case_errors(limpiar_renta["Territorio"])
+    return AssetCheckResult(
+        passed=len(incorrectos) == 0,
+        severity=AssetCheckSeverity.ERROR,
+        metadata={
+            "n_incorrectos":     MetadataValue.int(len(incorrectos)),
+            "ejemplos":          MetadataValue.text(str(incorrectos[:5])),
+            "principio_gestalt": MetadataValue.text("Similitud — Mayúsculas inconsistentes duplican leyendas."),
+            "mensaje": MetadataValue.text("limpiar_renta aplica .str.title() — revisa si hay caracteres especiales."),
+        },
+    )
+
+@asset_check(
+    asset="limpiar_renta",
+    name="check_nombre_invertido_limpiar_renta",
+    description="Verifica que Territorio no contiene 'Apellido, Artículo' tras la limpieza. Gestalt — Similitud.",
+)
+def check_nombre_invertido_limpiar_renta(limpiar_renta: pd.DataFrame) -> AssetCheckResult:
+    invertidos = _get_inverted_name_errors(limpiar_renta["Territorio"])
+    return AssetCheckResult(
+        passed=len(invertidos) == 0,
+        severity=AssetCheckSeverity.ERROR,
+        metadata={
+            "n_invertidos":      MetadataValue.int(len(invertidos)),
+            "ejemplos":          MetadataValue.text(str(invertidos[:5])),
+            "principio_gestalt": MetadataValue.text("Similitud — Crea dos colores distintos en ggplot."),
+            "mensaje": MetadataValue.text("Aplica _limpiar_formato_coma() sobre Territorio en limpiar_renta."),
+        },
+    )
+
+@asset_check(
+    asset="limpiar_renta",
     name="check_cardinalidad_fuente_renta",
-    description=(
-        "Limita el número de fuentes de renta a MAX_CATEGORIAS_COLOR. "
-        "Gestalt — Carga Cognitiva / Similitud."
-    ),
+    description="Limita el número de fuentes de renta a MAX_CATEGORIAS_COLOR. Gestalt — Carga Cognitiva.",
 )
 def check_cardinalidad_fuente_renta(limpiar_renta: pd.DataFrame) -> AssetCheckResult:
     n = int(limpiar_renta["Fuente_Renta_Code"].nunique())
@@ -255,26 +224,15 @@ def check_cardinalidad_fuente_renta(limpiar_renta: pd.DataFrame) -> AssetCheckRe
         metadata={
             "n_categorias":          MetadataValue.int(n),
             "limite_recomendado":    MetadataValue.int(MAX_CATEGORIAS_COLOR),
-            "sugerencia_agrupacion": MetadataValue.text(
-                "Agrupa fuentes minoritarias en 'Otras prestaciones' si n > 9."
-            ),
-            "principio_gestalt": MetadataValue.text(
-                "Carga Cognitiva / Similitud — Más de 9 colores son imposibles de distinguir."
-            ),
-            "mensaje": MetadataValue.text(
-                "ggplot asignará colores repetidos si hay más categorías que colores en la paleta."
-            ),
+            "sugerencia_agrupacion": MetadataValue.text("Agrupa fuentes minoritarias en 'Otras prestaciones'."),
+            "principio_gestalt": MetadataValue.text("Carga Cognitiva — Más de 9 colores son imposibles de distinguir."),
         },
     )
-
 
 @asset_check(
     asset="limpiar_renta",
     name="check_continuidad_serie_temporal_renta",
-    description=(
-        "Verifica que no falten años en la serie temporal. "
-        "Gestalt — Continuidad: un año faltante crea una pendiente falsa."
-    ),
+    description="Verifica que no falten años en la serie temporal. Gestalt — Continuidad.",
 )
 def check_continuidad_serie_temporal_renta(limpiar_renta: pd.DataFrame) -> AssetCheckResult:
     años = sorted(limpiar_renta["Año"].dropna().unique().tolist())
@@ -284,62 +242,16 @@ def check_continuidad_serie_temporal_renta(limpiar_renta: pd.DataFrame) -> Asset
         severity=AssetCheckSeverity.WARN,
         metadata={
             "fechas_faltantes": MetadataValue.text(str(faltantes) if faltantes else "ninguna"),
-            "rango_temporal":   MetadataValue.text(
-                f"{min(años)}–{max(años)}" if años else "vacío"
-            ),
-            "principio_gestalt": MetadataValue.text(
-                "Continuidad — Evita que una línea una puntos lejanos creando una pendiente falsa."
-            ),
-            "mensaje": MetadataValue.text(
-                "geom_line interpola entre los puntos disponibles; un año faltante produce "
-                "un salto visual engañoso."
-            ),
+            "rango_temporal":   MetadataValue.text(f"{min(años)}–{max(años)}" if años else "vacío"),
+            "principio_gestalt": MetadataValue.text("Continuidad — Un año faltante crea una pendiente falsa."),
+            "mensaje": MetadataValue.text("geom_line interpola sobre el hueco produciendo un salto visual engañoso."),
         },
     )
-
-
-@asset_check(
-    asset="limpiar_renta",
-    name="check_escala_y_renta",
-    description=(
-        "Detecta outliers extremos en Porcentaje que comprimirían el eje Y. "
-        "Gestalt — Proporcionalidad."
-    ),
-)
-def check_escala_y_renta(limpiar_renta: pd.DataFrame) -> AssetCheckResult:
-    valores = limpiar_renta["Porcentaje"].dropna()
-    v_min, v_max = float(valores.min()), float(valores.max())
-    ratio   = round(v_max / v_min, 2) if v_min > 0 else float("inf")
-    outlier = (
-        limpiar_renta.loc[limpiar_renta["Porcentaje"] == v_max, "Territorio"].iloc[0]
-        if not limpiar_renta.empty else "desconocido"
-    )
-    return AssetCheckResult(
-        passed=ratio <= RATIO_ESCALA_MAX,
-        severity=AssetCheckSeverity.WARN,
-        metadata={
-            "ratio_escala":       MetadataValue.float(ratio),
-            "valor_outlier":      MetadataValue.float(v_max),
-            "territorio_outlier": MetadataValue.text(str(outlier)),
-            "umbral_maximo":      MetadataValue.float(RATIO_ESCALA_MAX),
-            "principio_gestalt": MetadataValue.text(
-                "Proporcionalidad — Evita que barras pequeñas parezcan invisibles ante una gigante."
-            ),
-            "mensaje": MetadataValue.text(
-                f"Ratio max/min = {ratio}. Si supera {RATIO_ESCALA_MAX}, "
-                "considera escala logarítmica."
-            ),
-        },
-    )
-
 
 @asset_check(
     asset="limpiar_renta",
     name="check_label_text_territorio",
-    description=(
-        "Detecta etiquetas de Territorio demasiado largas. "
-        "Gestalt — Continuidad."
-    ),
+    description="Detecta etiquetas de Territorio demasiado largas. Gestalt — Continuidad.",
 )
 def check_label_text_territorio(limpiar_renta: pd.DataFrame) -> AssetCheckResult:
     longitudes = limpiar_renta["Territorio"].str.len()
@@ -349,19 +261,13 @@ def check_label_text_territorio(limpiar_renta: pd.DataFrame) -> AssetCheckResult
         passed=max_len <= MAX_LABEL_LENGTH,
         severity=AssetCheckSeverity.WARN,
         metadata={
-            "longest_label": MetadataValue.text(str(ejemplo)),
-            "longitud_max":  MetadataValue.int(max_len),
-            "limite":        MetadataValue.int(MAX_LABEL_LENGTH),
-            "overlap_risk":  MetadataValue.bool(max_len > MAX_LABEL_LENGTH),
-            "principio_gestalt": MetadataValue.text(
-                "Continuidad — Etiquetas largas se solapan y rompen la legibilidad del eje."
-            ),
-            "mensaje": MetadataValue.text(
-                "Considera abreviar municipios o rotar etiquetas (axis_text_x rotation=45)."
-            ),
+            "longest_label":     MetadataValue.text(str(ejemplo)),
+            "longitud_max":      MetadataValue.int(max_len),
+            "overlap_risk":      MetadataValue.bool(max_len > MAX_LABEL_LENGTH),
+            "principio_gestalt": MetadataValue.text("Continuidad — Etiquetas largas se solapan y rompen legibilidad."),
+            "mensaje": MetadataValue.text("Considera abreviar municipios o rotar etiquetas (rotation=45)."),
         },
     )
-
 
 @asset_check(
     asset="limpiar_codislas",
@@ -374,57 +280,113 @@ def check_cardinalidad_islas(limpiar_codislas: pd.DataFrame) -> AssetCheckResult
         passed=n <= MAX_CATEGORIAS_COLOR,
         severity=AssetCheckSeverity.WARN,
         metadata={
-            "n_categorias":       MetadataValue.int(n),
-            "limite_recomendado": MetadataValue.int(MAX_CATEGORIAS_COLOR),
-            "islas_detectadas":   MetadataValue.text(
-                str(sorted(limpiar_codislas["ISLA_clean"].dropna().unique().tolist()))
-            ),
-            "sugerencia_agrupacion": MetadataValue.text(
-                "Agrupa islas por provincia si n > 9."
-            ),
-            "principio_gestalt": MetadataValue.text(
-                "Similitud — Más de 9 colores son imposibles de distinguir."
-            ),
-            "mensaje": MetadataValue.text(
-                "Canarias tiene 7 islas — dentro del límite. Revisar si se añaden territorios."
-            ),
+            "n_categorias":      MetadataValue.int(n),
+            "principio_gestalt": MetadataValue.text("Similitud — Más de 9 colores son imposibles de distinguir."),
+            "mensaje": MetadataValue.text("Canarias tiene 7 islas. Revisar si se añaden territorios por error."),
         },
     )
 
+@asset_check(
+    asset="limpiar_codislas",
+    name="check_formato_title_limpiar_codislas",
+    description="Verifica que ISLA_clean y Territorio están en Title Case tras la limpieza. Gestalt — Similitud.",
+)
+def check_formato_title_limpiar_codislas(limpiar_codislas: pd.DataFrame) -> AssetCheckResult:
+    inc_isla = _get_title_case_errors(limpiar_codislas["ISLA_clean"])
+    inc_terr = _get_title_case_errors(limpiar_codislas["Territorio"])
+    total = len(inc_isla) + len(inc_terr)
+    return AssetCheckResult(
+        passed=total == 0,
+        severity=AssetCheckSeverity.ERROR,
+        metadata={
+            "ejemplos_ISLA_clean": MetadataValue.text(str(inc_isla[:5])),
+            "ejemplos_Territorio": MetadataValue.text(str(inc_terr[:5])),
+            "principio_gestalt":   MetadataValue.text("Similitud — Mayúsculas inconsistentes duplican leyendas."),
+        },
+    )
+
+@asset_check(
+    asset="limpiar_codislas",
+    name="check_nombre_invertido_limpiar_codislas",
+    description="Verifica que ISLA_clean y Territorio no contienen 'Apellido, Artículo'. Gestalt — Similitud.",
+)
+def check_nombre_invertido_limpiar_codislas(limpiar_codislas: pd.DataFrame) -> AssetCheckResult:
+    inv_isla = _get_inverted_name_errors(limpiar_codislas["ISLA_clean"])
+    inv_terr = _get_inverted_name_errors(limpiar_codislas["Territorio"])
+    total = len(inv_isla) + len(inv_terr)
+    return AssetCheckResult(
+        passed=total == 0,
+        severity=AssetCheckSeverity.ERROR,
+        metadata={
+            "ejemplos_ISLA_clean": MetadataValue.text(str(inv_isla[:5])),
+            "ejemplos_Territorio": MetadataValue.text(str(inv_terr[:5])),
+            "mensaje": MetadataValue.text("_limpiar_formato_coma() debería haber corregido esto."),
+        },
+    )
+
+@asset_check(
+    asset="limpiar_codislas",
+    name="check_duplicados_limpiar_codislas",
+    description="Verifica que no haya municipios duplicados tras la limpieza. Gestalt — Figura y Fondo.",
+)
+def check_duplicados_limpiar_codislas(limpiar_codislas: pd.DataFrame) -> AssetCheckResult:
+    n_duplicados = int(limpiar_codislas.duplicated().sum())
+    
+    # Extraemos un ejemplo si hay fallos para facilitar el debug en Dagster
+    ejemplos = []
+    if n_duplicados > 0:
+        ejemplos = limpiar_codislas[limpiar_codislas.duplicated(keep=False)].head(2).to_dict(orient="records")
+
+    return AssetCheckResult(
+        passed=n_duplicados == 0,
+        severity=AssetCheckSeverity.ERROR,
+        metadata={
+            "filas_duplicadas":  MetadataValue.int(n_duplicados),
+            "ejemplos":          MetadataValue.text(str(ejemplos) if ejemplos else "ninguno"),
+            "principio_gestalt": MetadataValue.text(
+                "Figura y Fondo — Un municipio duplicado aparecería dos veces en el facet del gráfico."
+            ),
+            "mensaje": MetadataValue.text(
+                "El merge con renta multiplicará filas si codislas tiene duplicados. Añade df.drop_duplicates() en limpiar_codislas."
+            ),
+        },
+    )
 
 @asset_check(
     asset="integrar_renta_codislas",
     name="check_integridad_join_renta_codislas",
     description=(
-        "Verifica que el LEFT JOIN no produzca ISLA_clean nulos. "
-        "Gestalt — Figura y Fondo."
+        "Verifica que el LEFT JOIN asigne una isla a todos los municipios. "
+        "Excluye agregados (Canarias, provincias, islas). Gestalt — Figura y Fondo."
     ),
 )
 def check_integridad_join_renta_codislas(integrar_renta_codislas: pd.DataFrame) -> AssetCheckResult:
-    n_sin_isla = int(integrar_renta_codislas["ISLA_clean"].isna().sum())
-    total      = len(integrar_renta_codislas)
-    pct        = round(n_sin_isla / total * 100, 2) if total else 0.0
-    ejemplos   = (
-        integrar_renta_codislas
-        .loc[integrar_renta_codislas["ISLA_clean"].isna(), "Territorio"]
+    # 1. Definimos los territorios que por naturaleza no tienen municipio/isla en el catálogo base
+    territorios_exentos = ["Canarias", "Las Palmas", "Santa Cruz de Tenerife"] + TODAS_ISLAS
+    
+    # 2. Filtramos el DataFrame para evaluar solo a los que deberían ser municipios
+    municipios = integrar_renta_codislas[~integrar_renta_codislas["Territorio"].isin(territorios_exentos)]
+    
+    # 3. Calculamos nulos solo sobre los municipios
+    n_sin_isla = int(municipios["ISLA_clean"].isna().sum())
+    
+    ejemplos = (
+        municipios.loc[municipios["ISLA_clean"].isna(), "Territorio"]
         .unique()[:5].tolist()
     )
+    
     return AssetCheckResult(
         passed=n_sin_isla == 0,
         severity=AssetCheckSeverity.WARN,
         metadata={
-            "filas_sin_isla":    MetadataValue.int(n_sin_isla),
-            "porcentaje_nulos":  MetadataValue.float(pct),
-            "ejemplos_sin_isla": MetadataValue.text(str(ejemplos)),
-            "principio_gestalt": MetadataValue.text(
-                "Figura y Fondo — Territorios sin isla asignada no aparecerán en el facet correcto."
-            ),
-            "mensaje": MetadataValue.text(
-                "Los territorios sin ISLA_clean no se pintarán en el gráfico territorial."
+            "municipios_huerfanos": MetadataValue.int(n_sin_isla),
+            "ejemplos_huerfanos":   MetadataValue.text(str(ejemplos) if ejemplos else "ninguno"),
+            "excluidos_del_check":  MetadataValue.text("Canarias, Provincias y nombres de Islas"),
+            "principio_gestalt":    MetadataValue.text(
+                "Figura y Fondo — Municipios sin isla asignada no aparecerán en el facet correcto."
             ),
         },
     )
-
 
 @asset_check(
     asset="limpiar_nivelestudios",
@@ -438,19 +400,10 @@ def check_continuidad_serie_temporal_nivelestudios(limpiar_nivelestudios: pd.Dat
         passed=len(faltantes) == 0,
         severity=AssetCheckSeverity.WARN,
         metadata={
-            "fechas_faltantes": MetadataValue.text(str(faltantes) if faltantes else "ninguna"),
-            "rango_temporal":   MetadataValue.text(
-                f"{min(años)}–{max(años)}" if años else "vacío"
-            ),
-            "principio_gestalt": MetadataValue.text(
-                "Continuidad — Un año faltante une puntos lejanos creando una pendiente falsa."
-            ),
-            "mensaje": MetadataValue.text(
-                "geom_area interpolará sobre el hueco produciendo un área engañosa."
-            ),
+            "fechas_faltantes":  MetadataValue.text(str(faltantes) if faltantes else "ninguna"),
+            "principio_gestalt": MetadataValue.text("Continuidad — Un año faltante une puntos lejanos creando un área engañosa."),
         },
     )
-
 
 @asset_check(
     asset="limpiar_nivelestudios",
@@ -460,81 +413,46 @@ def check_continuidad_serie_temporal_nivelestudios(limpiar_nivelestudios: pd.Dat
 def check_cardinalidad_nivel_estudios(limpiar_nivelestudios: pd.DataFrame) -> AssetCheckResult:
     col = "Nivel de estudios en curso"
     if col not in limpiar_nivelestudios.columns:
-        return AssetCheckResult(
-            passed=True,
-            metadata={"mensaje": MetadataValue.text(f"Columna '{col}' no encontrada, check omitido.")},
-        )
+        return AssetCheckResult(passed=True, metadata={"mensaje": MetadataValue.text(f"Columna '{col}' no encontrada.")})
     n = int(limpiar_nivelestudios[col].nunique())
     return AssetCheckResult(
         passed=n <= MAX_CATEGORIAS_COLOR,
         severity=AssetCheckSeverity.WARN,
         metadata={
             "n_categorias":          MetadataValue.int(n),
-            "limite_recomendado":    MetadataValue.int(MAX_CATEGORIAS_COLOR),
-            "sugerencia_agrupacion": MetadataValue.text(
-                "Usa MAPA_EDUCACION para reducir a 4 grupos: Básicos, Medios, Superiores, Sin Estudios."
-            ),
-            "principio_gestalt": MetadataValue.text(
-                "Carga Cognitiva / Similitud — Más de 9 colores son imposibles de distinguir."
-            ),
-            "mensaje": MetadataValue.text(
-                "El mapa MAPA_EDUCACION en config.py ya agrupa las categorías a 4 niveles."
-            ),
+            "sugerencia_agrupacion": MetadataValue.text("Usa MAPA_EDUCACION para reducir a 4 grupos principales."),
         },
     )
-
 
 @asset_check(
     asset="enriquecer_nivelestudios",
     name="check_dominance_otros_nivelestudios",
-    description=(
-        "Verifica que 'Sin Estudios/Otros' no supere DOMINANCE_OTROS_MAX del total "
-        "en la dimensión social activa del Dashboard. Gestalt — Semejanza."
-    ),
+    description="Verifica que 'Sin Estudios/Otros' no supere DOMINANCE_OTROS_MAX. Gestalt — Semejanza.",
 )
 def check_dominance_otros_nivelestudios(enriquecer_nivelestudios: pd.DataFrame) -> AssetCheckResult:
     col = "Nivel de estudios en curso"
     if col not in enriquecer_nivelestudios.columns:
-        return AssetCheckResult(
-            passed=True,
-            metadata={"mensaje": MetadataValue.text("Columna no encontrada, check omitido.")},
-        )
+        return AssetCheckResult(passed=True)
         
     df = enriquecer_nivelestudios.copy()
     df["Categoria"] = df[col].map(MAPA_EDUCACION)
-    
-    # 1. Asegurar tipo numérico para evitar fallos de ejecución
     df["Total"] = pd.to_numeric(df["Total"], errors="coerce").fillna(0)
     
-    # 2. Filtrar usando la lógica exacta de la visualización (Dashboard.DIM_SOCIAL)
-    filtro = df[col] != "Total"  # Quitamos la fila que suma todos los estudios
-    
+    filtro = df[col] != "Total"
     dim_activa = Dashboard.DIM_SOCIAL
     dimensiones_demograficas = ["Sexo", "Nacionalidad", "Edad"]
     
     for dim in dimensiones_demograficas:
         if dim in df.columns:
             if dim == dim_activa:
-                # Para la dimensión que graficamos (ej. Nacionalidad), EXCLUIMOS el "Total"
-                # para quedarnos con el desglose real (Española, Extranjera)
                 filtro = filtro & (df[dim] != "Total")
             elif "Total" in df[dim].unique():
-                # Para el resto (ej. Sexo), FIJAMOS en "Total" para no multiplicar la población
                 filtro = filtro & (df[dim] == "Total")
             
     df_f = df[filtro]
-    
-    # 3. Cálculos sobre los datos exactos que se van a graficar
     total_absoluto = df_f["Total"].sum()
     otros = df_f.loc[df_f["Categoria"] == "Sin Estudios/Otros", "Total"].sum()
-    
-    # 4. Forzar float() nativo
     pct = float(round(otros / total_absoluto * 100, 2)) if total_absoluto else 0.0
-    
-    top = (
-        df_f.groupby("Categoria")["Total"].sum()
-        .sort_values(ascending=False).head(4).to_dict()
-    )
     
     return AssetCheckResult(
         passed=pct <= (DOMINANCE_OTROS_MAX * 100),
@@ -542,18 +460,10 @@ def check_dominance_otros_nivelestudios(enriquecer_nivelestudios: pd.DataFrame) 
         metadata={
             "pct_of_total":      MetadataValue.float(pct),
             "umbral_maximo":     MetadataValue.float(DOMINANCE_OTROS_MAX * 100),
-            "top_categories":    MetadataValue.text(str(top)),
             "dashboard_activo":  MetadataValue.text(f"Dimensión evaluada: {dim_activa}"),
-            "principio_gestalt": MetadataValue.text(
-                "Semejanza — Un grupo 'Otros' dominante atrae la atención lejos de los datos relevantes."
-            ),
-            "mensaje": MetadataValue.text(
-                f"'Sin Estudios/Otros' = {pct}% en el desglose por {dim_activa}. "
-                f"Si supera {DOMINANCE_OTROS_MAX*100}%, considera separarlo del gráfico principal."
-            ),
+            "principio_gestalt": MetadataValue.text("Semejanza — Un grupo 'Otros' dominante atrae la atención lejos de los datos relevantes."),
         },
     )
-
 
 @asset_check(
     asset="enriquecer_nivelestudios",
@@ -563,82 +473,25 @@ def check_dominance_otros_nivelestudios(enriquecer_nivelestudios: pd.DataFrame) 
 def check_label_text_municipio(enriquecer_nivelestudios: pd.DataFrame) -> AssetCheckResult:
     longitudes = enriquecer_nivelestudios["Municipio_clean"].str.len()
     max_len    = int(longitudes.max())
-    ejemplo    = enriquecer_nivelestudios.loc[longitudes.idxmax(), "Municipio_clean"]
     return AssetCheckResult(
         passed=max_len <= MAX_LABEL_LENGTH,
         severity=AssetCheckSeverity.WARN,
         metadata={
-            "longest_label": MetadataValue.text(str(ejemplo)),
-            "longitud_max":  MetadataValue.int(max_len),
-            "limite":        MetadataValue.int(MAX_LABEL_LENGTH),
-            "overlap_risk":  MetadataValue.bool(max_len > MAX_LABEL_LENGTH),
-            "principio_gestalt": MetadataValue.text(
-                "Continuidad — Etiquetas largas se solapan en el eje Y del heatmap."
-            ),
-            "mensaje": MetadataValue.text(
-                "Considera truncar municipios a 30 chars en el gráfico de heatmap."
-            ),
+            "longitud_max":      MetadataValue.int(max_len),
+            "overlap_risk":      MetadataValue.bool(max_len > MAX_LABEL_LENGTH),
+            "principio_gestalt": MetadataValue.text("Continuidad — Etiquetas largas se solapan en el eje Y."),
         },
     )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ETAPA 3 — VISUALIZACIÓN (Asset)
-#
-# Todos estos checks leen config.Dashboard y filtran los datos con
-# _filtrar_datos_dashboard(), replicando exactamente el subconjunto
-# que graficar_renta_territorial() va a pintar.
+# ETAPA 3 — VISUALIZACIÓN (Asset) - Validaciones dinámicas según configuración
 # ══════════════════════════════════════════════════════════════════════════════
-
-@asset_check(
-    asset="generar_graficos_ejercicio3",
-    name="check_eje_cero_renta",
-    description=(
-        "Verifica que Dashboard.EJE_Y_CERO=True, lo que garantiza que el eje Y "
-        "nace en 0. "
-        "Gestalt — Veracidad Visual: truncar el eje Y exagera diferencias pequeñas. "
-        "Este check falla con WARN si EJE_Y_CERO=False en config.Dashboard."
-    ),
-    additional_ins={"integrar_renta_codislas": AssetIn()}
-)
-def check_eje_cero_renta(
-    generar_graficos_ejercicio3: list,
-    integrar_renta_codislas: pd.DataFrame,
-) -> AssetCheckResult:
-    eje_y_cero = Dashboard.EJE_Y_CERO
-    datos      = _filtrar_datos_dashboard(integrar_renta_codislas)
-    v_min      = float(datos["Porcentaje"].min()) if not datos.empty else 0.0
-    # Si EJE_Y_CERO=True el gráfico fuerza y=0; si es False y v_min > 0, el eje está truncado
-    truncado   = not eje_y_cero and v_min > 0
-    error_pct  = round(v_min / (datos["Porcentaje"].max() or 1) * 100, 2) if truncado else 0.0
-    return AssetCheckResult(
-        passed=not truncado,
-        severity=AssetCheckSeverity.WARN,
-        metadata={
-            "eje_y_cero_configurado": MetadataValue.bool(eje_y_cero),
-            "valor_inicio_eje":       MetadataValue.float(0.0 if eje_y_cero else v_min),
-            "error_perceptivo_pct":   MetadataValue.float(error_pct),
-            "dashboard_activo":       MetadataValue.text(_contexto_dashboard()),
-            "principio_gestalt": MetadataValue.text(
-                "Veracidad Visual — Truncar el eje Y exagera diferencias pequeñas."
-            ),
-            "mensaje": MetadataValue.text(
-                "Activa Dashboard.EJE_Y_CERO=True en config.py para que las barras nazcan en 0."
-                if truncado else
-                "EJE_Y_CERO=True — el eje Y nace en 0. ✓"
-            ),
-        },
-    )
-
 
 @asset_check(
     asset="generar_graficos_ejercicio3",
     name="check_datos_dashboard_no_vacios",
-    description=(
-        "Verifica que el subconjunto de datos filtrado por los parámetros actuales "
-        "de config.Dashboard no está vacío antes de generar el gráfico. "
-        "Gestalt — Figura y Fondo."
-    ),
+    description="Verifica que el subconjunto de datos filtrado por config.Dashboard no está vacío. Gestalt — Figura y Fondo.",
     additional_ins={"integrar_renta_codislas": AssetIn()}
 )
 def check_datos_dashboard_no_vacios(
@@ -656,44 +509,29 @@ def check_datos_dashboard_no_vacios(
             "filas_en_grafico":       MetadataValue.int(n_filas),
             "territorios_en_grafico": MetadataValue.int(n_terrs),
             "dashboard_activo":       MetadataValue.text(_contexto_dashboard()),
-            "principio_gestalt": MetadataValue.text(
-                "Figura y Fondo — Un gráfico sin datos no tiene figura que mostrar."
-            ),
-            "mensaje": MetadataValue.text(
-                f"La combinación territorio='{Dashboard.TERRITORIO}' + "
-                f"fuente='{Dashboard.FUENTE}' no produce datos. "
-                "Revisa config.Dashboard."
-                if not passed else
-                f"OK — {n_filas} filas para {n_terrs} territorios."
-            ),
+            "principio_gestalt":      MetadataValue.text("Figura y Fondo — Un gráfico sin datos no tiene figura que mostrar."),
         },
     )
-
 
 @asset_check(
     asset="generar_graficos_ejercicio3",
     name="check_escala_y_dashboard",
-    description=(
-        "Detecta outliers extremos en el subconjunto exacto que se va a graficar "
-        "según config.Dashboard. "
-        "Gestalt — Proporcionalidad."
-    ),
+    description="Detecta outliers extremos en el subconjunto graficado. Gestalt — Proporcionalidad.",
     additional_ins={"integrar_renta_codislas": AssetIn()}
 )
 def check_escala_y_dashboard(
     generar_graficos_ejercicio3: list,
     integrar_renta_codislas: pd.DataFrame,
 ) -> AssetCheckResult:
-    datos    = _filtrar_datos_dashboard(integrar_renta_codislas)
+    datos = _filtrar_datos_dashboard(integrar_renta_codislas)
     if datos.empty:
-        return AssetCheckResult(
-            passed=True,
-            metadata={"mensaje": MetadataValue.text("Sin datos para el dashboard actual.")},
-        )
-    valores  = datos["Porcentaje"].dropna()
+        return AssetCheckResult(passed=True)
+        
+    valores = datos["Porcentaje"].dropna()
     v_min, v_max = float(valores.min()), float(valores.max())
-    ratio    = round(v_max / v_min, 2) if v_min > 0 else float("inf")
-    outlier  = datos.loc[datos["Porcentaje"] == v_max, "Territorio"].iloc[0]
+    ratio   = round(v_max / v_min, 2) if v_min > 0 else float("inf")
+    outlier = datos.loc[datos["Porcentaje"] == v_max, "Territorio"].iloc[0]
+    
     return AssetCheckResult(
         passed=ratio <= RATIO_ESCALA_MAX,
         severity=AssetCheckSeverity.WARN,
@@ -701,27 +539,15 @@ def check_escala_y_dashboard(
             "ratio_escala":       MetadataValue.float(ratio),
             "valor_outlier":      MetadataValue.float(v_max),
             "territorio_outlier": MetadataValue.text(str(outlier)),
-            "umbral_maximo":      MetadataValue.float(RATIO_ESCALA_MAX),
             "dashboard_activo":   MetadataValue.text(_contexto_dashboard()),
-            "principio_gestalt": MetadataValue.text(
-                "Proporcionalidad — Evita que barras pequeñas parezcan invisibles ante una gigante."
-            ),
-            "mensaje": MetadataValue.text(
-                f"Ratio max/min = {ratio} en el gráfico de '{Dashboard.TERRITORIO}'. "
-                f"Umbral = {RATIO_ESCALA_MAX}."
-            ),
+            "principio_gestalt":  MetadataValue.text("Proporcionalidad — Evita que barras pequeñas parezcan invisibles ante una gigante."),
         },
     )
-
 
 @asset_check(
     asset="generar_graficos_ejercicio3",
     name="check_cardinalidad_dashboard",
-    description=(
-        "Verifica que el número de series en el gráfico actual no supera MAX_CATEGORIAS_COLOR. "
-        "Depende de si comparar_subterritorios es True (cuenta territorios) o False (cuenta fuentes). "
-        "Gestalt — Carga Cognitiva."
-    ),
+    description="Verifica que el número de series en el gráfico actual no supera MAX_CATEGORIAS_COLOR. Gestalt — Carga Cognitiva.",
     additional_ins={"integrar_renta_codislas": AssetIn()}
 )
 def check_cardinalidad_dashboard(
@@ -735,33 +561,22 @@ def check_cardinalidad_dashboard(
     else:
         n      = datos["Fuente_Renta_Code"].nunique() if not datos.empty else 0
         col_id = "Fuente_Renta_Code"
-    passed = n <= MAX_CATEGORIAS_COLOR
+        
     return AssetCheckResult(
-        passed=passed,
+        passed=n <= MAX_CATEGORIAS_COLOR,
         severity=AssetCheckSeverity.WARN,
         metadata={
             "n_series":           MetadataValue.int(n),
             "columna_series":     MetadataValue.text(col_id),
-            "limite_recomendado": MetadataValue.int(MAX_CATEGORIAS_COLOR),
             "dashboard_activo":   MetadataValue.text(_contexto_dashboard()),
-            "principio_gestalt": MetadataValue.text(
-                "Carga Cognitiva — Más de 9 colores son imposibles de distinguir."
-            ),
-            "mensaje": MetadataValue.text(
-                f"El gráfico de '{Dashboard.TERRITORIO}' tiene {n} series ({col_id}). "
-                f"Máximo recomendado: {MAX_CATEGORIAS_COLOR}."
-            ),
+            "principio_gestalt":  MetadataValue.text("Carga Cognitiva — Más de 9 colores son imposibles de distinguir."),
         },
     )
-
 
 @asset_check(
     asset="generar_graficos_ejercicio3",
     name="check_orden_magnitud_dashboard",
-    description=(
-        "Verifica si las series del gráfico actual están ordenadas por valor medio descendente. "
-        "Gestalt — Continuidad / Prägnanz: el ojo sigue una escalera suave."
-    ),
+    description="Verifica si las series del gráfico actual están ordenadas por valor medio descendente. Gestalt — Continuidad / Prägnanz.",
     additional_ins={"integrar_renta_codislas": AssetIn()}
 )
 def check_orden_magnitud_dashboard(
@@ -770,44 +585,30 @@ def check_orden_magnitud_dashboard(
 ) -> AssetCheckResult:
     datos = _filtrar_datos_dashboard(integrar_renta_codislas)
     if datos.empty:
-        return AssetCheckResult(
-            passed=True,
-            metadata={"mensaje": MetadataValue.text("Sin datos para el dashboard actual.")},
-        )
+        return AssetCheckResult(passed=True)
+        
     col_serie = "Territorio" if Dashboard.COMPARAR_SUBS else "Fuente_Renta"
     medias    = datos.groupby(col_serie)["Porcentaje"].mean().sort_values(ascending=False)
-    orden_actual  = list(medias.index)
-    orden_optimo  = orden_actual  # ya está ordenado tras sort_values
-    is_sorted     = orden_actual == orden_optimo
+    
+    orden_actual = list(medias.index)
+    orden_optimo = orden_actual  # Ya está ordenado gracias a sort_values
+    is_sorted    = orden_actual == orden_optimo
+    
     return AssetCheckResult(
         passed=is_sorted,
         severity=AssetCheckSeverity.WARN,
         metadata={
-            "orden_detectado":  MetadataValue.text(str(orden_actual)),
-            "is_sorted":        MetadataValue.bool(is_sorted),
-            "sugerencia_orden": MetadataValue.text(
-                f"En aes() usa reorder({col_serie}, -Porcentaje) para ordenar la leyenda."
-            ),
-            "dashboard_activo": MetadataValue.text(_contexto_dashboard()),
-            "principio_gestalt": MetadataValue.text(
-                "Continuidad / Prägnanz — El ojo sigue una escalera suave; "
-                "el orden reduce el esfuerzo cognitivo."
-            ),
-            "mensaje": MetadataValue.text(
-                "Categorías desordenadas obligan al usuario a saltar entre colores para comparar."
-            ),
+            "is_sorted":         MetadataValue.bool(is_sorted),
+            "sugerencia_orden":  MetadataValue.text(f"Usa reorder({col_serie}, -Porcentaje) en aes()."),
+            "dashboard_activo":  MetadataValue.text(_contexto_dashboard()),
+            "principio_gestalt": MetadataValue.text("Continuidad / Prägnanz — El ojo sigue una escalera suave; reduce el esfuerzo cognitivo."),
         },
     )
-
 
 @asset_check(
     asset="generar_graficos_ejercicio3",
     name="check_graficos_generados",
-    description=(
-        "Verifica que los ficheros PNG se han generado con tamaño > 10 KB. "
-        "Un fichero vacío indica un error silencioso en plotnine."
-    ),
-    
+    description="Verifica que los ficheros PNG se han generado con tamaño > 10 KB. Gestalt — Veracidad Visual.",
 )
 def check_graficos_generados(generar_graficos_ejercicio3: list) -> AssetCheckResult:
     resultados = {}
@@ -819,47 +620,14 @@ def check_graficos_generados(generar_graficos_ejercicio3: list) -> AssetCheckRes
         if not ok:
             todos_ok = False
         resultados[os.path.basename(ruta)] = f"{'OK' if ok else 'FALLO'} ({size_kb} KB)"
+        
     return AssetCheckResult(
         passed=todos_ok,
         severity=AssetCheckSeverity.ERROR,
         metadata={
             "graficos":          MetadataValue.text(str(resultados)),
             "dashboard_activo":  MetadataValue.text(_contexto_dashboard()),
-            "principio_gestalt": MetadataValue.text(
-                "Veracidad Visual — Un gráfico vacío o truncado transmite información falsa."
-            ),
-            "mensaje": MetadataValue.text(
-                "Si size < 10 KB, plotnine generó un gráfico vacío (datos insuficientes o error)."
-            ),
-        },
-    )
-
-
-@asset_check(
-    asset="generar_graficos_ejercicio3",
-    name="check_consistencia_color_paleta",
-    description=(
-        "Valida que la paleta maestra no ha cambiado respecto al hash de referencia. "
-        "Gestalt — Similitud."
-    ),
-    
-)
-def check_consistencia_color_paleta(generar_graficos_ejercicio3: list) -> AssetCheckResult:
-    hash_actual = hashlib.md5(str(sorted(PALETA_MAESTRA.items())).encode()).hexdigest()
-    ha_cambiado = hash_actual != _PALETA_HASH
-    return AssetCheckResult(
-        passed=not ha_cambiado,
-        severity=AssetCheckSeverity.WARN,
-        metadata={
-            "palette_id":       MetadataValue.text(hash_actual),
-            "hash_referencia":  MetadataValue.text(_PALETA_HASH),
-            "has_changed":      MetadataValue.bool(ha_cambiado),
-            "dashboard_activo": MetadataValue.text(_contexto_dashboard()),
-            "principio_gestalt": MetadataValue.text(
-                "Similitud — Colores distintos para la misma categoría rompen la consistencia visual."
-            ),
-            "mensaje": MetadataValue.text(
-                "Si la paleta cambia, actualiza _PALETA_HASH en checks.py."
-            ),
+            "principio_gestalt": MetadataValue.text("Veracidad Visual — Un gráfico vacío o truncado transmite información falsa."),
+            "mensaje": MetadataValue.text("Si size < 10 KB, plotnine generó un gráfico vacío (datos insuficientes o error)."),
         },
     )

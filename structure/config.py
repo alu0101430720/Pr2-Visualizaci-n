@@ -7,10 +7,10 @@ por lo que el check siempre validará el gráfico que se está generando en ese 
 """
 
 # ── Repositorio Git ────────────────────────────────────────────────────────────
-REPO_DIR   = "Pr2-Visualizacion"
+REPO_DIR   = "/content/Pr2-Visualizacion"
 REPO_OWNER = "alu0101430720"
 REPO_NAME  = "Pr2-Visualizacion"
-GIT_BRANCH = "practica3/data-checks"
+GIT_BRANCH = "practica3_refactorizado"
 GIT_EMAIL  = "alu0101430720@ull.edu.es"
 GIT_NAME   = "Carlos Yanes"
 
