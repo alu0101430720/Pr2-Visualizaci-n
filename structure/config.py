@@ -1,7 +1,7 @@
 # config.py — Constantes y configuración compartida del proyecto Pr2-Visualizacion.
 
 # ── Repositorio Git ────────────────────────────────────────────────────────────
-REPO_DIR   = "Pr2-Visualizacion"
+REPO_DIR   = "/content/Pr2-Visualizacion"
 REPO_OWNER = "alu0101430720"
 REPO_NAME  = "Pr2-Visualizacion"
 GIT_BRANCH = "practica3/data-checks"
