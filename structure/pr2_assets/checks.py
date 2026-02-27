@@ -488,8 +488,8 @@ def check_cardinalidad_nivel_estudios(limpiar_nivelestudios: pd.DataFrame) -> As
     asset="enriquecer_nivelestudios",
     name="check_dominance_otros_nivelestudios",
     description=(
-        "Verifica que 'Sin Estudios/Otros' no supere DOMINANCE_OTROS_MAX del total. "
-        "Gestalt — Semejanza."
+        "Verifica que 'Sin Estudios/Otros' no supere DOMINANCE_OTROS_MAX del total "
+        "en la dimensión social activa del Dashboard. Gestalt — Semejanza."
     ),
 )
 def check_dominance_otros_nivelestudios(enriquecer_nivelestudios: pd.DataFrame) -> AssetCheckResult:
@@ -499,28 +499,56 @@ def check_dominance_otros_nivelestudios(enriquecer_nivelestudios: pd.DataFrame) 
             passed=True,
             metadata={"mensaje": MetadataValue.text("Columna no encontrada, check omitido.")},
         )
+        
     df = enriquecer_nivelestudios.copy()
     df["Categoria"] = df[col].map(MAPA_EDUCACION)
-    df_f = df[(df["Sexo"] == "Total") & (df[col] != "Total")]
-    total  = df_f["Total"].sum()
-    otros  = df_f.loc[df_f["Categoria"] == "Sin Estudios/Otros", "Total"].sum()
-    pct    = round(otros / total * 100, 2) if total else 0.0
-    top    = (
+    
+    # 1. Asegurar tipo numérico para evitar fallos de ejecución
+    df["Total"] = pd.to_numeric(df["Total"], errors="coerce").fillna(0)
+    
+    # 2. Filtrar usando la lógica exacta de la visualización (Dashboard.DIM_SOCIAL)
+    filtro = df[col] != "Total"  # Quitamos la fila que suma todos los estudios
+    
+    dim_activa = Dashboard.DIM_SOCIAL
+    dimensiones_demograficas = ["Sexo", "Nacionalidad", "Edad"]
+    
+    for dim in dimensiones_demograficas:
+        if dim in df.columns:
+            if dim == dim_activa:
+                # Para la dimensión que graficamos (ej. Nacionalidad), EXCLUIMOS el "Total"
+                # para quedarnos con el desglose real (Española, Extranjera)
+                filtro = filtro & (df[dim] != "Total")
+            elif "Total" in df[dim].unique():
+                # Para el resto (ej. Sexo), FIJAMOS en "Total" para no multiplicar la población
+                filtro = filtro & (df[dim] == "Total")
+            
+    df_f = df[filtro]
+    
+    # 3. Cálculos sobre los datos exactos que se van a graficar
+    total_absoluto = df_f["Total"].sum()
+    otros = df_f.loc[df_f["Categoria"] == "Sin Estudios/Otros", "Total"].sum()
+    
+    # 4. Forzar float() nativo
+    pct = float(round(otros / total_absoluto * 100, 2)) if total_absoluto else 0.0
+    
+    top = (
         df_f.groupby("Categoria")["Total"].sum()
         .sort_values(ascending=False).head(4).to_dict()
     )
+    
     return AssetCheckResult(
-        passed=pct <= DOMINANCE_OTROS_MAX * 100,
+        passed=pct <= (DOMINANCE_OTROS_MAX * 100),
         severity=AssetCheckSeverity.WARN,
         metadata={
-            "pct_of_total":    MetadataValue.float(pct),
-            "umbral_maximo":   MetadataValue.float(DOMINANCE_OTROS_MAX * 100),
-            "top_categories":  MetadataValue.text(str(top)),
+            "pct_of_total":      MetadataValue.float(pct),
+            "umbral_maximo":     MetadataValue.float(DOMINANCE_OTROS_MAX * 100),
+            "top_categories":    MetadataValue.text(str(top)),
+            "dashboard_activo":  MetadataValue.text(f"Dimensión evaluada: {dim_activa}"),
             "principio_gestalt": MetadataValue.text(
                 "Semejanza — Un grupo 'Otros' dominante atrae la atención lejos de los datos relevantes."
             ),
             "mensaje": MetadataValue.text(
-                f"'Sin Estudios/Otros' = {pct}%. "
+                f"'Sin Estudios/Otros' = {pct}% en el desglose por {dim_activa}. "
                 f"Si supera {DOMINANCE_OTROS_MAX*100}%, considera separarlo del gráfico principal."
             ),
         },
