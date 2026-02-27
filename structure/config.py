@@ -19,9 +19,12 @@ def repo_url(token: str) -> str:
 
 
 # ── Rutas de datasets ──────────────────────────────────────────────────────────
-RAW_RENTA         = f"{REPO_DIR}/distribucion-renta-canarias.csv"
-RAW_CODISLAS      = f"{REPO_DIR}/codislas.csv"
-RAW_NIVELESTUDIOS = f"{REPO_DIR}/nivelestudios.xlsx"
+# RAW_RENTA         = f"{REPO_DIR}/distribucion-renta-canarias.csv"
+# RAW_CODISLAS      = f"{REPO_DIR}/codislas.csv"
+# RAW_NIVELESTUDIOS = f"{REPO_DIR}/nivelestudios.xlsx"
+RAW_RENTA         = f"{REPO_DIR}/datasets-check/distribucion-renta-canarias-checks.csv"
+RAW_CODISLAS      = f"{REPO_DIR}/datasets-check/codislas-checks.csv"
+RAW_NIVELESTUDIOS = f"{REPO_DIR}/datasets-check/nivelestudios-checks.xlsx"
 
 DIR_CLEAN   = f"{REPO_DIR}/datasets-clean"
 DIR_GRAFICOS = f"{REPO_DIR}/graficos"
@@ -74,7 +77,7 @@ class Dashboard:
     COMPARAR_SUBS    = True                # True → cada línea es un subterritorio
     DESGLOSAR_MUNIS  = True                # True → municipios, False → isla agregada
     MOSTRAR_LEYENDA  = True
-    EJE_Y_CERO       = True               # Si False, check_eje_cero fallará en WARN
+    EJE_Y_CERO       = False               # Si False, check_eje_cero fallará en WARN
 
 
 # ── Umbrales de calidad visual ─────────────────────────────────────────────────

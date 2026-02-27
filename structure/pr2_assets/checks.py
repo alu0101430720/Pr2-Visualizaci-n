@@ -94,23 +94,43 @@ def _contexto_dashboard() -> str:
 @asset_check(
     asset="ingestar_renta",
     name="check_nulos_criticos_renta",
-    description="Detecta ausencia de datos en OBS_VALUE (porcentaje de renta). Gestalt — Figura y Fondo.",
+    description="Detecta ausencia de datos en variables críticas (Territorio, Tiempo, Medidas y Valores). Gestalt — Figura y Fondo.",
 )
 def check_nulos_criticos_renta(ingestar_renta: pd.DataFrame) -> AssetCheckResult:
-    col    = "OBS_VALUE"
-    n_nulos = int(ingestar_renta[col].isna().sum())
-    total   = len(ingestar_renta)
-    pct     = round(n_nulos / total * 100, 2) if total else 0.0
+    # Definimos todas las columnas críticas a revisar
+    cols = [
+        "TERRITORIO#es", 
+        "TERRITORIO_CODE", 
+        "TIME_PERIOD#es", 
+        "TIME_PERIOD_CODE", 
+        "MEDIDAS#es", 
+        "MEDIDAS_CODE", 
+        "OBS_VALUE"
+    ]
+    
+    # Nos aseguramos de buscar solo en las columnas que existen en el DataFrame (evita KeyErrors)
+    cols_existentes = [c for c in cols if c in ingestar_renta.columns]
+    
+    # Calculamos cuántas filas tienen al menos un nulo en estas columnas
+    n_nulos = int(ingestar_renta[cols_existentes].isna().any(axis=1).sum())
+    
+    # (Opcional pero muy útil) Sacamos un diccionario con el recuento de nulos por cada columna
+    detalle_nulos = ingestar_renta[cols_existentes].isna().sum().to_dict()
+    
+    total = len(ingestar_renta)
+    pct = round(n_nulos / total * 100, 2) if total else 0.0
+    
     return AssetCheckResult(
         passed=n_nulos == 0,
         severity=AssetCheckSeverity.ERROR,
         metadata={
-            "porcentaje_nulos": MetadataValue.float(pct),
+            "porcentaje_filas_incompletas": MetadataValue.float(pct),
             "filas_afectadas":  MetadataValue.int(n_nulos),
+            "detalle_por_columna": MetadataValue.text(str(detalle_nulos)),
             "principio_gestalt": MetadataValue.text(
                 "Figura y Fondo — Los huecos inesperados rompen la forma de la visualización."
             ),
-            "mensaje": MetadataValue.text("Un NaN en OBS_VALUE produce un corte en la línea temporal."),
+            "mensaje": MetadataValue.text("Un NaN en variables clave arruina las agrupaciones o produce cortes en la línea temporal."),
         },
     )
 
@@ -235,8 +255,11 @@ def check_cardinalidad_fuente_renta(limpiar_renta: pd.DataFrame) -> AssetCheckRe
     description="Verifica que no falten años en la serie temporal. Gestalt — Continuidad.",
 )
 def check_continuidad_serie_temporal_renta(limpiar_renta: pd.DataFrame) -> AssetCheckResult:
-    años = sorted(limpiar_renta["Año"].dropna().unique().tolist())
+    # Añadimos .astype(int) justo después de dropna()
+    años = sorted(limpiar_renta["Año"].dropna().astype(int).unique().tolist())
+    
     faltantes = [a for a in range(min(años), max(años) + 1) if a not in años] if años else []
+    
     return AssetCheckResult(
         passed=len(faltantes) == 0,
         severity=AssetCheckSeverity.WARN,
