@@ -1,0 +1,17 @@
+# ── Python ─────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# ── Dagster ────────────────────────────────────────────────────────────────────
+# Directorios temporales de home y storage (contienen outputs serializados
+# de assets, logs de runs, etc. — nunca deben commitearse)
+.tmp_dagster_home*/
+.dagster/
+dagster_logs.txt
+
+# ── Entornos ───────────────────────────────────────────────────────────────────
+.env
+.venv
+venv/
