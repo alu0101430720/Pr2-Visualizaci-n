@@ -1,18 +1,13 @@
 # Pr2-Visualización
 
-Se cuenta con dos notebooks:
+*Alumno*: **Carlos Yanes Pérez**
 
-  1. Pr2-Visualizacion-CarlosYanesPerez-lab-renta.ipynb. Aquí se muestra la lógica seguida para el preprocesado de los datasets y la creación de los gráficos.
-
-      [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1fynBq2wazR61BC3VpXCu8Pci01diL024?usp=sharing)
-
-   2. Pr2-Visualizacion-CarlosYanesPerez-V2.ipynb. En este caso se presenta la orquestación en Dagster.
-
-      [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1BR2nPEB1wYUOcW08n43Z4maHiedqeRIr?usp=sharing)
-
-Los notebooks son totalmente independientes, pero se hace uso de ambos para separar la lógica seguida, de la orquestación final.
+Se cuenta con un notebook en el que see integran los checks y se realiza el lanzamiento de Dagster.
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1V4TtK1wVorjxxJ6tDbUHWayt58TlDeVh?usp=sharing)
 
 Este repositorio cuenta con:
 1. Los datasets originales aportados en la tarea.
 2. Directorio datasets-clean, donde se suben los datasets procesados.
-3. Directorio graficos, donde se almacenan los gráficos generados.
+3. Directorio datasets-check, que se usan para comprobar la activación de los checks.
+4. Directorio graficos, donde se almacenan los gráficos generados.
+5. Directorio structure, donde se encuentra un árbol de directorios con los códigos para el lanzamiento del orquestador.
